@@ -18,7 +18,7 @@ export default async function handler(req, res) {
             return res.status(500).json({ error: 'Server configuration error: GEMINI_API_KEY is missing.' });
         }
 
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
         // 4. ゲームデザインに適合させるシステムインストラクション（プロンプト）の定義
         const systemInstruction =
