@@ -12,16 +12,17 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: 'No spell provided in request body.' });
         }
 
-        // 3. Vercelのダッシュボードで設定する環境変数からAPIキーを読み込む
+        // 3. Vercelの環境変数からAPIキーを読み込む
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) {
             return res.status(500).json({ error: 'Server configuration error: GEMINI_API_KEY is missing.' });
         }
 
+        // ⚠️ モデルエンドポイントを gemini-2.5-flash に設定
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
         // 4. ゲームデザインに適合させるシステムインストラクション（プロンプト）の定義
-        const systemInstruction =
+        const systemInstruction = 
             "You are the backend engine of the game 'Spell Glitch'. " +
             "Evaluate the user's spell input based on: " +
             "1. Original sound retention (Does it sound like a base magic spell?) " +
@@ -50,7 +51,7 @@ export default async function handler(req, res) {
         }
 
         const responseData = await geminiResponse.json();
-
+        
         // 7. Geminiの返答テキストを抽出
         let rawAiText = responseData.candidates[0].content.parts[0].text.trim();
         console.log("Raw AI Response:", rawAiText);
@@ -71,9 +72,9 @@ export default async function handler(req, res) {
 
     } catch (error) {
         console.error("Internal Server Error Details:", error);
-        return res.status(500).json({
-            error: 'Internal Server Error',
-            details: error.message
+        return res.status(500).json({ 
+            error: 'Internal Server Error', 
+            details: error.message 
         });
     }
 }
