@@ -17,24 +17,35 @@ export default async function handler(req, res) {
 
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-        // ✅ 更新：状態異常判定をプロンプトに追加
+        // ✅ 強化版：状態異常が積極的に発生するプロンプト
         const systemInstruction = 
             "You are the backend engine of the game 'Spell Glitch'. " +
-            "Evaluate the user's spell input based on: " +
-            "1. Original sound retention (Does it sound like a base magic spell?) " +
-            "2. Creativity and madness (Does it contain power words like extreme, super, explode?) " +
-            "3. Demerits (If power is extremely high, add status penalties). " +
-            "Also determine ONE status effect to apply to the PLAYER as a demerit based on the spell's chaos level. " +
-            "Status effect rules: " +
-            "- 'none': normal spell, no side effect. " +
-            "- 'poison': chaotic spell, player loses HP each turn. " +
-            "- 'stun': very unstable spell, player skips next cast. " +
-            "- 'burn': fire/explosion spell gone wrong, player takes burn damage. " +
-            "- 'blind': corrupted targeting, player's damage is halved next turn. " +
-            "- 'curse': darkest glitch, player's max MP is reduced temporarily. " +
-            "You MUST output raw JSON only, matching the exact format: " +
+            "The player inputs a spell incantation and you evaluate its power and side effects. " +
+
+            "STEP 1 - Determine power (float between 0.1 and 5.0): " +
+            "- Simple clean spell (e.g. 'fire', 'heal'): power 0.3~0.7 " +
+            "- Modified spell (e.g. 'mega fire', 'super heal'): power 0.8~1.5 " +
+            "- Chaotic spell (e.g. 'EXPLODE EVERYTHING', 'ultra death glitch'): power 2.0~5.0 " +
+
+            "STEP 2 - Determine element string: fire, water, thunder, wind, dark, glitch, heal, etc. " +
+
+            "STEP 3 - Determine status_effect. This is a MANDATORY field. Rules: " +
+            "- power <= 0.7: status_effect = 'none' (safe spell) " +
+            "- power 0.8~1.4: 50% chance of a minor effect. Choose 'blind' or 'none'. " +
+            "- power 1.5~2.4: MUST apply a status effect. Choose from: poison, burn, blind. " +
+            "- power >= 2.5: MUST apply a heavy status effect. Choose from: stun, curse, poison. " +
+            "Effect meanings for flavor: " +
+            "- poison: spell corrupted player's blood, HP drains each turn " +
+            "- stun: recoil overloaded player's mana circuits, skip next turn " +
+            "- burn: backfire scorched the caster " +
+            "- blind: targeting array glitched, damage halved next turn " +
+            "- curse: dark energy backlash, max MP reduced temporarily " +
+
+            "STEP 4 - Write effect (short visual effect description) and log_message (flavor text for the magic tome). " +
+
+            "You MUST output raw JSON only, no markdown, no explanation. Exact format: " +
             "{ \"power\": float, \"element\": \"string\", \"effect\": \"string\", \"log_message\": \"string\", \"status_effect\": \"string\" } " +
-            "status_effect must be one of: none, poison, stun, burn, blind, curse";
+            "status_effect MUST be exactly one of: none, poison, stun, burn, blind, curse. Never omit this field.";
 
         const requestPayload = {
             contents: [{ parts: [{ text: spell }] }],
@@ -67,9 +78,20 @@ export default async function handler(req, res) {
 
         const parsedGameResult = JSON.parse(cleanedJsonText);
 
-        // ✅ status_effectが含まれていない場合のフォールバック
+        // フォールバック：status_effectが欠落している場合
         if (!parsedGameResult.status_effect) {
             parsedGameResult.status_effect = "none";
+        }
+
+        // powerが高いのにnoneの場合はサーバー側で上書き補正
+        if (parsedGameResult.power >= 2.5 && parsedGameResult.status_effect === "none") {
+            const heavyEffects = ["stun", "curse", "poison"];
+            parsedGameResult.status_effect = heavyEffects[Math.floor(Math.random() * heavyEffects.length)];
+            console.log(`Power override: applied status_effect = ${parsedGameResult.status_effect}`);
+        } else if (parsedGameResult.power >= 1.5 && parsedGameResult.status_effect === "none") {
+            const midEffects = ["poison", "burn", "blind"];
+            parsedGameResult.status_effect = midEffects[Math.floor(Math.random() * midEffects.length)];
+            console.log(`Power override: applied status_effect = ${parsedGameResult.status_effect}`);
         }
 
         return res.status(200).json(parsedGameResult);
