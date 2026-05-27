@@ -1,43 +1,65 @@
 export default async function handler(req, res) {
-    // 1. セキュリティ対策: POSTメソッド以外のリクエストを遮断
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
     try {
-        // 2. Unityから送信されたスペル（詠唱テキスト）を抽出
         const { spell } = req.body;
 
         if (!spell) {
             return res.status(400).json({ error: 'No spell provided in request body.' });
         }
 
-        // 3. Vercelの環境変数からAPIキーを読み込む
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) {
             return res.status(500).json({ error: 'Server configuration error: GEMINI_API_KEY is missing.' });
         }
 
-        // ⚠️ モデルエンドポイントを gemini-2.5-flash に設定
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-        // 4. ゲームデザインに適合させるシステムインストラクション（プロンプト）の定義
-        const systemInstruction = 
-            "You are the backend engine of the game 'Spell Glitch'. " +
-            "Evaluate the user's spell input based on: " +
-            "1. Original sound retention (Does it sound like a base magic spell?) " +
-            "2. Creativity and madness (Does it contain power words like extreme, super, explode?) " +
-            "3. Demerits (If power is extremely high, add status penalties). " +
-            "You MUST output raw JSON only, matching the exact format: " +
-            "{ \"power\": float, \"effect\": \"string\", \"log_message\": \"string\" }";
+        // ================================================================
+        // システムプロンプト
+        // ================================================================
+        const systemInstruction =
+            "You are the spell evaluation engine for the dark fantasy game 'Spell Glitch'.\n" +
+            "The player inputs a spell incantation in English. Analyze it and return a JSON response.\n" +
+            "\n" +
+            "## Evaluation Criteria\n" +
+            "1. **power** (float, min 0.5): Base damage multiplier.\n" +
+            "   - Short, simple words → 0.5 ~ 1.0\n" +
+            "   - Creative or dramatic phrasing → 1.0 ~ 1.5\n" +
+            "   - Extreme, violent, or chaotic language → 1.5 ~ 2.0\n" +
+            "   - Do NOT exceed 2.0. Forbidden keyword bonuses are applied separately by the game engine.\n" +
+            "\n" +
+            "2. **element** (string): Choose the most fitting element based on the spell's tone and words.\n" +
+            "   Must be exactly one of: \"fire\", \"ice\", \"dark\", \"holy\", \"glitch\", \"none\"\n" +
+            "\n" +
+            "3. **status_effect** (string): A debuff inflicted on the enemy.\n" +
+            "   Assign based on the NATURE of the spell, NOT its power.\n" +
+            "   A weak, creeping curse can still inflict \"poison\" or \"curse\".\n" +
+            "   A blinding flash inflicts \"blind\" even at low power.\n" +
+            "   Must be exactly one of: \"none\", \"poison\", \"stun\", \"burn\", \"blind\", \"curse\"\n" +
+            "   - poison : slow decay, toxin, rot, plague-like words\n" +
+            "   - stun   : lightning, shock, paralysis, freeze-in-place words\n" +
+            "   - burn   : fire, scorch, ignite, incinerate words\n" +
+            "   - blind  : flash, light, darkness, shadow, obscure words\n" +
+            "   - curse  : hex, doom, wither, soul, damnation words\n" +
+            "   - none   : straightforward attack spells with no debuff flavor\n" +
+            "\n" +
+            "4. **effect** (string): A short visual effect description (max 8 words). e.g. \"crimson flames erupt from the ground\"\n" +
+            "\n" +
+            "5. **log_message** (string): One sentence of atmospheric flavor text describing what happened.\n" +
+            "\n" +
+            "## Output Format\n" +
+            "You MUST return raw JSON only. No markdown, no explanation, no code fences.\n" +
+            "Exact format:\n" +
+            "{ \"power\": float, \"element\": \"string\", \"status_effect\": \"string\", \"effect\": \"string\", \"log_message\": \"string\" }";
 
-        // 5. Gemini APIへのリクエストペイロード構築
         const requestPayload = {
             contents: [{ parts: [{ text: spell }] }],
             systemInstruction: { parts: [{ text: systemInstruction }] }
         };
 
-        // 6. Gemini APIへの非同期通信の実行 (Node.js 18+ 標準のfetchを使用)
         const geminiResponse = await fetch(geminiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -51,13 +73,10 @@ export default async function handler(req, res) {
         }
 
         const responseData = await geminiResponse.json();
-        
-        // 7. Geminiの返答テキストを抽出
+
         let rawAiText = responseData.candidates[0].content.parts[0].text.trim();
         console.log("Raw AI Response:", rawAiText);
 
-        // 8. 頑丈なパース処理 (Robust JSON Cleansing)
-        // Geminiがまれに指示を無視して返す "```json ... ```" などのマークダウン装飾を除去
         let cleanedJsonText = rawAiText;
         if (cleanedJsonText.includes("```")) {
             cleanedJsonText = cleanedJsonText
@@ -66,15 +85,29 @@ export default async function handler(req, res) {
                 .trim();
         }
 
-        // 9. クレンジング後のデータをJSONオブジェクト化してUnityへ返却
         const parsedGameResult = JSON.parse(cleanedJsonText);
+
+        // ================================================================
+        // サニティチェック：想定外の値が返ってきたときのフォールバック
+        // ================================================================
+        const validElements = ["fire", "ice", "dark", "holy", "glitch", "none"];
+        const validStatuses = ["none", "poison", "stun", "burn", "blind", "curse"];
+
+        if (!validElements.includes(parsedGameResult.element)) {
+            parsedGameResult.element = "none";
+        }
+        if (!validStatuses.includes(parsedGameResult.status_effect)) {
+            parsedGameResult.status_effect = "none";
+        }
+        parsedGameResult.power = Math.max(0.5, Math.min(2.0, parseFloat(parsedGameResult.power) || 1.0));
+
         return res.status(200).json(parsedGameResult);
 
     } catch (error) {
         console.error("Internal Server Error Details:", error);
-        return res.status(500).json({ 
-            error: 'Internal Server Error', 
-            details: error.message 
+        return res.status(500).json({
+            error: 'Internal Server Error',
+            details: error.message
         });
     }
 }
