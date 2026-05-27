@@ -15,9 +15,9 @@ export default async function handler(req, res) {
             return res.status(500).json({ error: 'Server configuration error: GEMINI_API_KEY is missing.' });
         }
 
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+        // ✅ gemini-2.0-flash に変更（2.5-flashより高い無料枠、v1beta対応）
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
-        // ✅ system_instructionを使わず、プロンプトをユーザーメッセージに直接埋め込む
         const fullPrompt =
             "You are the backend engine of the game 'Spell Glitch'. " +
             "Evaluate the following spell incantation and respond ONLY with a JSON object. " +
@@ -69,7 +69,6 @@ export default async function handler(req, res) {
 
         console.log("Raw AI Response:", rawAiText);
 
-        // マークダウン除去
         let cleanedJsonText = rawAiText;
         if (cleanedJsonText.includes("```")) {
             cleanedJsonText = cleanedJsonText
@@ -84,7 +83,6 @@ export default async function handler(req, res) {
             parsedGameResult.status_effect = "none";
         }
 
-        // powerが高いのにnoneの場合はサーバー側で補正
         if (parsedGameResult.power >= 2.5 && parsedGameResult.status_effect === "none") {
             const effects = ["stun", "curse", "poison"];
             parsedGameResult.status_effect = effects[Math.floor(Math.random() * effects.length)];
