@@ -49,7 +49,7 @@ export default async function handler(req, res) {
 
         const requestPayload = {
             contents: [{ parts: [{ text: spell }] }],
-            systemInstruction: { parts: [{ text: systemInstruction }] }
+            system_instruction: { parts: [{ text: systemInstruction }] }
         };
 
         const geminiResponse = await fetch(geminiUrl, {
