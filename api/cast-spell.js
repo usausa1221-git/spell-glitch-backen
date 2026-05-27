@@ -17,39 +17,30 @@ export default async function handler(req, res) {
 
         const geminiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
-        // ✅ 強化版：状態異常が積極的に発生するプロンプト
-        const systemInstruction = 
+        // ✅ system_instructionを使わず、プロンプトをユーザーメッセージに直接埋め込む
+        const fullPrompt =
             "You are the backend engine of the game 'Spell Glitch'. " +
-            "The player inputs a spell incantation and you evaluate its power and side effects. " +
+            "Evaluate the following spell incantation and respond ONLY with a JSON object. " +
+            "No markdown, no explanation, just raw JSON.\n\n" +
 
-            "STEP 1 - Determine power (float between 0.1 and 5.0): " +
-            "- Simple clean spell (e.g. 'fire', 'heal'): power 0.3~0.7 " +
-            "- Modified spell (e.g. 'mega fire', 'super heal'): power 0.8~1.5 " +
-            "- Chaotic spell (e.g. 'EXPLODE EVERYTHING', 'ultra death glitch'): power 2.0~5.0 " +
+            "RULES:\n" +
+            "- power (float 0.1~5.0): simple spell=0.3~0.7, modified=0.8~1.5, chaotic=2.0~5.0\n" +
+            "- element: fire, water, thunder, wind, dark, glitch, heal, etc.\n" +
+            "- status_effect (MANDATORY):\n" +
+            "  - power <= 0.7 → 'none'\n" +
+            "  - power 0.8~1.4 → 'blind' or 'none'\n" +
+            "  - power 1.5~2.4 → MUST be one of: poison, burn, blind\n" +
+            "  - power >= 2.5  → MUST be one of: stun, curse, poison\n" +
+            "- effect: short visual description\n" +
+            "- log_message: flavor text for the magic tome\n\n" +
 
-            "STEP 2 - Determine element string: fire, water, thunder, wind, dark, glitch, heal, etc. " +
+            "OUTPUT FORMAT (strict):\n" +
+            "{ \"power\": float, \"element\": \"string\", \"effect\": \"string\", \"log_message\": \"string\", \"status_effect\": \"string\" }\n\n" +
 
-            "STEP 3 - Determine status_effect. This is a MANDATORY field. Rules: " +
-            "- power <= 0.7: status_effect = 'none' (safe spell) " +
-            "- power 0.8~1.4: 50% chance of a minor effect. Choose 'blind' or 'none'. " +
-            "- power 1.5~2.4: MUST apply a status effect. Choose from: poison, burn, blind. " +
-            "- power >= 2.5: MUST apply a heavy status effect. Choose from: stun, curse, poison. " +
-            "Effect meanings for flavor: " +
-            "- poison: spell corrupted player's blood, HP drains each turn " +
-            "- stun: recoil overloaded player's mana circuits, skip next turn " +
-            "- burn: backfire scorched the caster " +
-            "- blind: targeting array glitched, damage halved next turn " +
-            "- curse: dark energy backlash, max MP reduced temporarily " +
-
-            "STEP 4 - Write effect (short visual effect description) and log_message (flavor text for the magic tome). " +
-
-            "You MUST output raw JSON only, no markdown, no explanation. Exact format: " +
-            "{ \"power\": float, \"element\": \"string\", \"effect\": \"string\", \"log_message\": \"string\", \"status_effect\": \"string\" } " +
-            "status_effect MUST be exactly one of: none, poison, stun, burn, blind, curse. Never omit this field.";
+            "Spell to evaluate: \"" + spell + "\"";
 
         const requestPayload = {
-            contents: [{ parts: [{ text: spell }] }],
-            system_instruction: { parts: [{ text: systemInstruction }] }
+            contents: [{ parts: [{ text: fullPrompt }] }]
         };
 
         const geminiResponse = await fetch(geminiUrl, {
@@ -61,13 +52,24 @@ export default async function handler(req, res) {
         if (!geminiResponse.ok) {
             const errText = await geminiResponse.text();
             console.error("Gemini API Error Response:", errText);
-            return res.status(500).json({ error: 'Failed to communicate with Gemini API.' });
+            return res.status(500).json({ error: 'Failed to communicate with Gemini API.', details: errText });
         }
 
         const responseData = await geminiResponse.json();
-        let rawAiText = responseData.candidates[0].content.parts[0].text.trim();
+
+        const candidate = responseData.candidates?.[0];
+        if (!candidate) {
+            return res.status(500).json({ error: 'No response from Gemini.' });
+        }
+
+        let rawAiText = candidate.content?.parts?.[0]?.text?.trim();
+        if (!rawAiText) {
+            return res.status(500).json({ error: 'Empty response from Gemini.' });
+        }
+
         console.log("Raw AI Response:", rawAiText);
 
+        // マークダウン除去
         let cleanedJsonText = rawAiText;
         if (cleanedJsonText.includes("```")) {
             cleanedJsonText = cleanedJsonText
@@ -78,26 +80,23 @@ export default async function handler(req, res) {
 
         const parsedGameResult = JSON.parse(cleanedJsonText);
 
-        // フォールバック：status_effectが欠落している場合
         if (!parsedGameResult.status_effect) {
             parsedGameResult.status_effect = "none";
         }
 
-        // powerが高いのにnoneの場合はサーバー側で上書き補正
+        // powerが高いのにnoneの場合はサーバー側で補正
         if (parsedGameResult.power >= 2.5 && parsedGameResult.status_effect === "none") {
-            const heavyEffects = ["stun", "curse", "poison"];
-            parsedGameResult.status_effect = heavyEffects[Math.floor(Math.random() * heavyEffects.length)];
-            console.log(`Power override: applied status_effect = ${parsedGameResult.status_effect}`);
+            const effects = ["stun", "curse", "poison"];
+            parsedGameResult.status_effect = effects[Math.floor(Math.random() * effects.length)];
         } else if (parsedGameResult.power >= 1.5 && parsedGameResult.status_effect === "none") {
-            const midEffects = ["poison", "burn", "blind"];
-            parsedGameResult.status_effect = midEffects[Math.floor(Math.random() * midEffects.length)];
-            console.log(`Power override: applied status_effect = ${parsedGameResult.status_effect}`);
+            const effects = ["poison", "burn", "blind"];
+            parsedGameResult.status_effect = effects[Math.floor(Math.random() * effects.length)];
         }
 
         return res.status(200).json(parsedGameResult);
 
     } catch (error) {
-        console.error("Internal Server Error Details:", error);
+        console.error("Internal Server Error:", error);
         return res.status(500).json({ 
             error: 'Internal Server Error', 
             details: error.message 
