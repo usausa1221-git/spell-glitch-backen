@@ -24,24 +24,24 @@ export default async function handler(req, res) {
                 "Game: Spell Glitch. You are an enemy wizard casting a spell against the player.\n" +
                 "The enemy's chosen spell is: \"" + spell + "\"\n\n" +
                 "Reply with ONLY these 5 lines, nothing else:\n" +
-                "POWER: [number between 0.3 and 3.0]\n" +
-                "ELEMENT: [fire/water/thunder/wind/dark/glitch]\n" +
-                "EFFECT: [short visual description of the enemy's attack]\n" +
-                "LOG: [flavor text describing the enemy's action]\n" +
-                "STATUS: [none/poison/stun/burn/blind/curse]\n\n" +
-                "Rules for POWER: weak=0.3-0.7, normal=0.8-1.5, strong=1.6-3.0\n" +
-                "Rules for STATUS: power<=0.7=none, power0.8-1.4=none or blind, power>=1.5=poison or burn or stun";
+                "##POWER## [number between 0.3 and 3.0]\n" +
+                "##ELEMENT## [fire/water/thunder/wind/dark/glitch]\n" +
+                "##EFFECT## [short visual description of the enemy's attack]\n" +
+                "##LOG## [flavor text describing the enemy's action]\n" +
+                "##STATUS## [none/poison/stun/burn/blind/curse]\n\n" +
+                "Rules for ##POWER##: weak=0.3-0.7, normal=0.8-1.5, strong=1.6-3.0\n" +
+                "Rules for ##STATUS##: power<=0.7=none, power0.8-1.4=none or blind, power>=1.5=poison or burn or stun";
         } else {
             prompt =
                 "Game: Spell Glitch. Evaluate this spell: \"" + spell + "\"\n\n" +
                 "Reply with ONLY these 5 lines, nothing else:\n" +
-                "POWER: [number between 0.1 and 5.0]\n" +
-                "ELEMENT: [fire/water/thunder/wind/dark/glitch/heal]\n" +
-                "EFFECT: [short visual description]\n" +
-                "LOG: [flavor text]\n" +
-                "STATUS: [none/poison/stun/burn/blind/curse]\n\n" +
-                "Rules for POWER: simple spell=0.3-0.7, modified=0.8-1.5, chaotic=2.0-5.0\n" +
-                "Rules for STATUS: power<=0.7=none, power0.8-1.4=blind or none, power1.5-2.4=poison or burn or blind, power>=2.5=stun or curse or poison";
+                "##POWER## [number between 0.1 and 5.0]\n" +
+                "##ELEMENT## [fire/water/thunder/wind/dark/glitch/heal]\n" +
+                "##EFFECT## [short visual description]\n" +
+                "##LOG## [flavor text]\n" +
+                "##STATUS## [none/poison/stun/burn/blind/curse]\n\n" +
+                "Rules for ##POWER##: simple spell=0.3-0.7, modified=0.8-1.5, chaotic=2.0-5.0\n" +
+                "Rules for ##STATUS##: power<=0.7=none, power0.8-1.4=blind or none, power1.5-2.4=poison or burn or blind, power>=2.5=stun or curse or poison";
         }
 
         const requestPayload = {
@@ -73,9 +73,9 @@ export default async function handler(req, res) {
 
         console.log("Raw AI Response:", rawAiText);
 
-        // キーワードベースのパース（Gemmaが余計なテキストを返しても対応）
+        // ✅ ##キーワード## 形式で抽出（大文字小文字混在の誤マッチを防ぐ）
         const extract = (key) => {
-            const match = rawAiText.match(new RegExp(key + ':\\s*(.+)', 'i'));
+            const match = rawAiText.match(new RegExp('##' + key + '##\\s*(.+)', 'i'));
             return match ? match[1].trim() : null;
         };
 
@@ -93,6 +93,8 @@ export default async function handler(req, res) {
             const effects = ["poison", "burn", "blind"];
             status = effects[Math.floor(Math.random() * effects.length)];
         }
+
+        console.log(`Parsed → power:${power} element:${element} status:${status}`);
 
         return res.status(200).json({
             power,
