@@ -4,7 +4,7 @@ export default async function handler(req, res) {
     }
 
     try {
-        const { spell } = req.body;
+        const { spell, is_enemy } = req.body;
 
         if (!spell) {
             return res.status(400).json({ error: 'No spell provided in request body.' });
@@ -17,17 +17,34 @@ export default async function handler(req, res) {
 
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent?key=${apiKey}`;
 
-        // ✅ Gemmaの思考出力からデータを抽出するため、キー名をそのまま書かせる形式に変更
-        const prompt =
-            "Game: Spell Glitch. Evaluate this spell: \"" + spell + "\"\n\n" +
-            "Reply with ONLY these 5 lines, nothing else:\n" +
-            "POWER: [number between 0.1 and 5.0]\n" +
-            "ELEMENT: [fire/water/thunder/wind/dark/glitch/heal]\n" +
-            "EFFECT: [short visual description]\n" +
-            "LOG: [flavor text]\n" +
-            "STATUS: [none/poison/stun/burn/blind/curse]\n\n" +
-            "Rules for POWER: simple spell=0.3-0.7, modified=0.8-1.5, chaotic=2.0-5.0\n" +
-            "Rules for STATUS: power<=0.7=none, power0.8-1.4=blind or none, power1.5-2.4=poison or burn or blind, power>=2.5=stun or curse or poison";
+        let prompt;
+
+        if (is_enemy) {
+            // ✅ 敵用プロンプト：敵が自分で呪文を詠唱・評価する
+            prompt =
+                "Game: Spell Glitch. You are an enemy wizard casting a spell against the player.\n" +
+                "The enemy's chosen spell is: \"" + spell + "\"\n\n" +
+                "Reply with ONLY these 5 lines, nothing else:\n" +
+                "POWER: [number between 0.3 and 3.0]\n" +
+                "ELEMENT: [fire/water/thunder/wind/dark/glitch]\n" +
+                "EFFECT: [short visual description of the enemy's attack]\n" +
+                "LOG: [flavor text describing the enemy's action]\n" +
+                "STATUS: [none/poison/stun/burn/blind/curse]\n\n" +
+                "Rules for POWER: weak=0.3-0.7, normal=0.8-1.5, strong=1.6-3.0\n" +
+                "Rules for STATUS: power<=0.7=none, power0.8-1.4=none or blind, power>=1.5=poison or burn or stun";
+        } else {
+            // ✅ プレイヤー用プロンプト（既存）
+            prompt =
+                "Game: Spell Glitch. Evaluate this spell: \"" + spell + "\"\n\n" +
+                "Reply with ONLY these 5 lines, nothing else:\n" +
+                "POWER: [number between 0.1 and 5.0]\n" +
+                "ELEMENT: [fire/water/thunder/wind/dark/glitch/heal]\n" +
+                "EFFECT: [short visual description]\n" +
+                "LOG: [flavor text]\n" +
+                "STATUS: [none/poison/stun/burn/blind/curse]\n\n" +
+                "Rules for POWER: simple spell=0.3-0.7, modified=0.8-1.5, chaotic=2.0-5.0\n" +
+                "Rules for STATUS: power<=0.7=none, power0.8-1.4=blind or none, power1.5-2.4=poison or burn or blind, power>=2.5=stun or curse or poison";
+        }
 
         const requestPayload = {
             contents: [{ parts: [{ text: prompt }] }]
@@ -58,43 +75,36 @@ export default async function handler(req, res) {
 
         console.log("Raw AI Response:", rawAiText);
 
-        // ✅ キーワードベースのパース（JSON不要）
         const extract = (key) => {
             const match = rawAiText.match(new RegExp(key + ':\\s*(.+)', 'i'));
             return match ? match[1].trim() : null;
         };
 
-        const powerStr = extract('POWER');
-        const element  = extract('ELEMENT') || 'fire';
-        const effect   = extract('EFFECT')  || 'A mysterious energy surges.';
-        const log      = extract('LOG')     || 'The spell was cast.';
-        const status   = extract('STATUS')  || 'none';
-
-        const power = parseFloat(powerStr) || 0.5;
+        const power  = parseFloat(extract('POWER')) || 0.5;
+        const element = extract('ELEMENT') || 'fire';
+        const effect  = extract('EFFECT')  || 'A mysterious energy surges.';
+        const log     = extract('LOG')     || 'The spell was cast.';
+        let status    = (extract('STATUS') || 'none').toLowerCase();
 
         // powerが高いのにnoneの場合はサーバー側で補正
-        let finalStatus = status.toLowerCase();
-        if (power >= 2.5 && finalStatus === "none") {
+        if (power >= 2.5 && status === "none") {
             const effects = ["stun", "curse", "poison"];
-            finalStatus = effects[Math.floor(Math.random() * effects.length)];
-        } else if (power >= 1.5 && finalStatus === "none") {
+            status = effects[Math.floor(Math.random() * effects.length)];
+        } else if (power >= 1.5 && status === "none") {
             const effects = ["poison", "burn", "blind"];
-            finalStatus = effects[Math.floor(Math.random() * effects.length)];
+            status = effects[Math.floor(Math.random() * effects.length)];
         }
 
         return res.status(200).json({
-            power:         power,
-            element:       element,
-            effect:        effect,
+            power,
+            element,
+            effect,
             log_message:   log,
-            status_effect: finalStatus
+            status_effect: status
         });
 
     } catch (error) {
         console.error("Internal Server Error:", error);
-        return res.status(500).json({ 
-            error: 'Internal Server Error', 
-            details: error.message 
-        });
+        return res.status(500).json({ error: 'Internal Server Error', details: error.message });
     }
 }
