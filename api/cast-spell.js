@@ -15,30 +15,23 @@ export default async function handler(req, res) {
             return res.status(500).json({ error: 'Server configuration error: GEMINI_API_KEY is missing.' });
         }
 
-        // ✅ gemma-4-31b-it に変更
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent?key=${apiKey}`;
 
         const systemInstruction =
             "You are the backend engine of the game 'Spell Glitch'. " +
             "The player inputs a spell incantation and you evaluate its power and side effects. " +
+            "IMPORTANT: Output ONLY the JSON object. No explanation, no steps, no markdown, no bullet points. Just the raw JSON. " +
 
-            "STEP 1 - Determine power (float between 0.1 and 5.0): " +
-            "- Simple clean spell (e.g. 'fire', 'heal'): power 0.3~0.7 " +
-            "- Modified spell (e.g. 'mega fire', 'super heal'): power 0.8~1.5 " +
-            "- Chaotic spell (e.g. 'EXPLODE EVERYTHING', 'ultra death glitch'): power 2.0~5.0 " +
-
-            "STEP 2 - Determine element string: fire, water, thunder, wind, dark, glitch, heal, etc. " +
-
-            "STEP 3 - Determine status_effect. This is a MANDATORY field. Rules: " +
-            "- power <= 0.7: status_effect = 'none' " +
-            "- power 0.8~1.4: choose 'blind' or 'none' " +
-            "- power 1.5~2.4: MUST apply one of: poison, burn, blind " +
-            "- power >= 2.5: MUST apply one of: stun, curse, poison " +
-
-            "STEP 4 - Write effect (short visual description) and log_message (flavor text). " +
-
-            "Output raw JSON only, no markdown. Exact format: " +
-            "{ \"power\": float, \"element\": \"string\", \"effect\": \"string\", \"log_message\": \"string\", \"status_effect\": \"string\" }";
+            "power (float 0.1~5.0): simple spell=0.3~0.7, modified=0.8~1.5, chaotic=2.0~5.0. " +
+            "element: fire, water, thunder, wind, dark, glitch, heal, etc. " +
+            "status_effect (MANDATORY): " +
+            "power<=0.7 → none, " +
+            "power 0.8~1.4 → blind or none, " +
+            "power 1.5~2.4 → poison or burn or blind, " +
+            "power>=2.5 → stun or curse or poison. " +
+            "effect: short visual description. " +
+            "log_message: flavor text. " +
+            "Output format: {\"power\":float,\"element\":\"string\",\"effect\":\"string\",\"log_message\":\"string\",\"status_effect\":\"string\"}";
 
         const requestPayload = {
             contents: [{ parts: [{ text: spell }] }],
@@ -71,13 +64,24 @@ export default async function handler(req, res) {
 
         console.log("Raw AI Response:", rawAiText);
 
+        // ✅ 強化版パース：テキスト中から { } のJSONブロックだけを抽出
         let cleanedJsonText = rawAiText;
+
+        // マークダウンコードブロックを除去
         if (cleanedJsonText.includes("```")) {
             cleanedJsonText = cleanedJsonText
                 .replace(/```json/g, "")
                 .replace(/```/g, "")
                 .trim();
         }
+
+        // { から } までのJSONブロックを正規表現で抽出
+        const jsonMatch = cleanedJsonText.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+            console.error("No JSON found in response:", rawAiText);
+            return res.status(500).json({ error: 'No JSON found in Gemini response.' });
+        }
+        cleanedJsonText = jsonMatch[0];
 
         const parsedGameResult = JSON.parse(cleanedJsonText);
 
