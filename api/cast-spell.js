@@ -13,7 +13,7 @@ public class SpellInputManager : MonoBehaviour
     [SerializeField] private BattleStatusManager statusManager;
 
     [Header("Network Configuration")]
-    [SerializeField] private string vercelApiUrl = "https://spell-glitch-backen-o8y5y68wo-takuto-s-lolprojects.vercel.app/api/cast-spell";
+    [SerializeField] private string vercelApiUrl = "https://spell-glitch-backen.vercel.app/";
 
     [Header("Turn UI")]
     [SerializeField] private TMP_Text turnIndicatorText; // ✅ 「Your Turn」「Enemy Turn」表示用
