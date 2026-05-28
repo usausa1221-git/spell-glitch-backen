@@ -35,7 +35,8 @@ export default async function handler(req, res) {
                 "Game: Spell Glitch. Evaluate this spell incantation: \"" + spell + "\"\n\n" +
                 "Output ONLY these 7 lines at the very end of your response:\n" +
                 "POWER: [number 0.1-5.0]\n" +
-                "ELEMENT: [fire/water/thunder/wind/dark/glitch/heal]\n" +
+                // ✅ ここに "mana" を追加
+                "ELEMENT: [fire/water/thunder/wind/dark/glitch/heal/mana]\n" +
                 "EFFECT: [short visual description]\n" +
                 "LOG: [flavor text]\n" +
                 "STATUS: [none/poison/stun/burn/blind/curse]\n" +
@@ -80,16 +81,11 @@ export default async function handler(req, res) {
 
         console.log("Raw AI Response:", rawAiText);
 
-        // ✅ 全行を走査して「最後に出現したキー行」の値を取得
-        // - 大文字小文字を無視（POWER / power 両対応）
-        // - 行頭の記号・空白・箇条書き（* - >) を読み飛ばす
-        // - 括弧やコメント付きの値にも対応
         const extractLast = (key) => {
             const lines = rawAiText.split('\n');
             const keyLower = key.toLowerCase();
             let lastMatch = null;
             for (const line of lines) {
-                // 行頭のゴミ文字（* - > 空白など）を除去してからマッチ
                 const cleaned = line.replace(/^[\s\*\-\>]+/, '').trim();
                 const colonIdx = cleaned.indexOf(':');
                 if (colonIdx === -1) continue;
@@ -102,14 +98,12 @@ export default async function handler(req, res) {
             return lastMatch;
         };
 
-        // ✅ 数値抽出：先頭の数値のみ（"3.8 (Chaotic...)" → 3.8）
         const extractNumber = (key, fallback) => {
             const raw = extractLast(key) || '';
             const num = parseFloat(raw.match(/^[\d.]+/)?.[0]);
             return isNaN(num) ? fallback : num;
         };
 
-        // ✅ 単語抽出：先頭の英単語のみ（"glitch - OK." → "glitch"）
         const extractWord = (key, fallback) => {
             const raw = extractLast(key) || '';
             return raw.match(/^[a-zA-Z_]+/)?.[0]?.toLowerCase() || fallback;
@@ -121,7 +115,6 @@ export default async function handler(req, res) {
         const log     = extractLast  ('log')     || 'The spell was cast.';
         let status    = extractWord  ('status',  'none');
 
-        // ✅ 敵用はバックラッシュなし
         if (is_enemy) {
             if (power >= 2.5 && status === 'none') {
                 status = ['stun', 'curse', 'poison'][Math.floor(Math.random() * 3)];
@@ -140,13 +133,11 @@ export default async function handler(req, res) {
             });
         }
 
-        // ✅ プレイヤー用：バックラッシュ
         let backlashDamage = extractNumber('backlash_damage', 0.0);
         let backlashStatus = extractWord  ('backlash_status', 'none');
 
         const isGlitch = element === 'glitch';
 
-        // サーバー側補正
         if (power < 2.5) {
             backlashDamage = 0.0;
             backlashStatus = 'none';
@@ -169,7 +160,6 @@ export default async function handler(req, res) {
             }
         }
 
-        // 通常status補正
         if (power >= 2.5 && status === 'none') {
             status = ['stun', 'curse', 'poison'][Math.floor(Math.random() * 3)];
         } else if (power >= 1.5 && status === 'none') {
