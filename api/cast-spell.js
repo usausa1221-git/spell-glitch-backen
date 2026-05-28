@@ -1,227 +1,112 @@
-using UnityEngine;
-using System.Collections;
-using System.Text;
-using UnityEngine.Networking;
-using TMPro;
-
-public class SpellInputManager : MonoBehaviour
-{
-    [SerializeField] private TMP_InputField spellInputField;
-    [SerializeField] private TMP_Text damageText;
-
-    [Header("Battle System Reference")]
-    [SerializeField] private BattleStatusManager statusManager;
-
-    [Header("Network Configuration")]
-    [SerializeField] private string vercelApiUrl = "https://spell-glitch-backen.vercel.app/";
-
-    [Header("Turn UI")]
-    [SerializeField] private TMP_Text turnIndicatorText; // ✅ 「Your Turn」「Enemy Turn」表示用
-
-    // 敵が使う呪文のリスト（Gemmaが評価する）
-    private string[] enemySpells = {
-        "Dark Nova", "Shadow Fang", "Void Burst",
-        "Crimson Flame", "Thunder Crush", "Poison Mist",
-        "Chaos Bolt", "Death Whisper", "Glitch Storm"
-    };
-
-    [System.Serializable]
-    public class SpellResult
-    {
-        public float power;
-        public string element;
-        public string effect;
-        public string log_message;
-        public string status_effect;
+export default async function handler(req, res) {
+    if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
-    private void Start()
-    {
-        StartCoroutine(StartBattle());
-    }
+    try {
+        const { spell, is_enemy } = req.body;
 
-    // ✅ バトル開始：先攻後攻を決定してターンを開始
-    private IEnumerator StartBattle()
-    {
-        yield return new WaitForSeconds(0.5f);
-        bool playerFirst = statusManager.DeterminePlayerGoesFirst();
-
-        if (playerFirst)
-        {
-            statusManager.SetPlayerTurn();
-            UpdateTurnUI("Your Turn! Chant a spell.");
-            SetInputInteractable(true);
+        if (!spell) {
+            return res.status(400).json({ error: 'No spell provided in request body.' });
         }
-        else
-        {
-            statusManager.SetEnemyTurn();
-            UpdateTurnUI("Enemy goes first!");
-            SetInputInteractable(false);
-            yield return new WaitForSeconds(1.5f);
-            StartCoroutine(EnemyTurn());
+
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+            return res.status(500).json({ error: 'Server configuration error: GEMINI_API_KEY is missing.' });
         }
-    }
 
-    // ✅ プレイヤーが詠唱ボタンを押したとき
-    public void OnCastSpell()
-    {
-        if (statusManager.IsBattleOver) return;
-        if (statusManager.CurrentTurn != BattleStatusManager.TurnState.PlayerTurn) return;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent?key=${apiKey}`;
 
-        string playerInput = spellInputField.text.Trim();
+        let prompt;
 
-        if (!string.IsNullOrEmpty(playerInput))
-        {
-            if (!statusManager.CanCastSpell(10))
-            {
-                damageText.text = statusManager.IsStunned
-                    ? "[Stun] STUNNED! Cannot cast spell this turn."
-                    : "Not enough MP!";
-
-                if (statusManager.IsStunned)
-                {
-                    // スタン中はターンだけ消費
-                    statusManager.ProcessTurnEffects();
-                    StartCoroutine(AfterPlayerTurn());
-                }
-                return;
-            }
-
-            SetInputInteractable(false);
-            damageText.text = "Analyzing Incantation...";
-            StartCoroutine(PlayerTurn(playerInput));
-            spellInputField.text = "";
+        if (is_enemy) {
+            prompt =
+                "Game: Spell Glitch. You are an enemy wizard casting a spell against the player.\n" +
+                "The enemy's chosen spell is: \"" + spell + "\"\n\n" +
+                "Reply with ONLY these 5 lines, nothing else:\n" +
+                "POWER: [number between 0.3 and 3.0]\n" +
+                "ELEMENT: [fire/water/thunder/wind/dark/glitch]\n" +
+                "EFFECT: [short visual description of the enemy's attack]\n" +
+                "LOG: [flavor text describing the enemy's action]\n" +
+                "STATUS: [none/poison/stun/burn/blind/curse]\n\n" +
+                "Rules for POWER: weak=0.3-0.7, normal=0.8-1.5, strong=1.6-3.0\n" +
+                "Rules for STATUS: power<=0.7=none, power0.8-1.4=none or blind, power>=1.5=poison or burn or stun";
+        } else {
+            prompt =
+                "Game: Spell Glitch. Evaluate this spell: \"" + spell + "\"\n\n" +
+                "Reply with ONLY these 5 lines, nothing else:\n" +
+                "POWER: [number between 0.1 and 5.0]\n" +
+                "ELEMENT: [fire/water/thunder/wind/dark/glitch/heal]\n" +
+                "EFFECT: [short visual description]\n" +
+                "LOG: [flavor text]\n" +
+                "STATUS: [none/poison/stun/burn/blind/curse]\n\n" +
+                "Rules for POWER: simple spell=0.3-0.7, modified=0.8-1.5, chaotic=2.0-5.0\n" +
+                "Rules for STATUS: power<=0.7=none, power0.8-1.4=blind or none, power1.5-2.4=poison or burn or blind, power>=2.5=stun or curse or poison";
         }
-        else
-        {
-            damageText.text = "No incantation entered!";
+
+        const requestPayload = {
+            contents: [{ parts: [{ text: prompt }] }]
+        };
+
+        const geminiResponse = await fetch(geminiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestPayload)
+        });
+
+        if (!geminiResponse.ok) {
+            const errText = await geminiResponse.text();
+            console.error("Gemini API Error Response:", errText);
+            return res.status(500).json({ error: 'Failed to communicate with Gemini API.', details: errText });
         }
-    }
 
-    // ✅ プレイヤーターンの処理
-    private IEnumerator PlayerTurn(string spellText)
-    {
-        yield return StartCoroutine(SendSpellToServer(spellText, isEnemy: false, (result) =>
-        {
-            if (result == null) return;
-
-            statusManager.ConsumePlayerMP(10);
-            statusManager.ApplyDamageToEnemy(result.power, result.element);
-            statusManager.ApplyStatusEffect(result.status_effect ?? "none");
-            statusManager.ProcessTurnEffects();
-
-            float finalDamage = 100f * result.power;
-            string statusLine = (!string.IsNullOrEmpty(result.status_effect) && result.status_effect != "none")
-                ? $"[!] Status Effect: {result.status_effect.ToUpper()}\n" : "";
-
-            damageText.text =
-                $"[Spell Glitch Triggered!]\n" +
-                $"Element: {result.element}\n" +
-                $"Effect: {result.effect}\n" +
-                $"Damage: {Mathf.FloorToInt(finalDamage)}\n" +
-                statusLine +
-                $"\nLog: {result.log_message}";
-        }));
-
-        if (!statusManager.IsBattleOver)
-            StartCoroutine(AfterPlayerTurn());
-    }
-
-    // ✅ プレイヤーターン終了後：敵ターンへ移行
-    private IEnumerator AfterPlayerTurn()
-    {
-        yield return new WaitForSeconds(2.0f);
-        statusManager.SetEnemyTurn();
-        UpdateTurnUI("Enemy's Turn...");
-        yield return new WaitForSeconds(1.0f);
-        StartCoroutine(EnemyTurn());
-    }
-
-    // ✅ 敵ターンの処理
-    private IEnumerator EnemyTurn()
-    {
-        if (statusManager.IsBattleOver) yield break;
-
-        // 敵がランダムに呪文を選択
-        string enemySpell = enemySpells[Random.Range(0, enemySpells.Length)];
-        Debug.Log($"敵が詠唱：{enemySpell}");
-
-        yield return StartCoroutine(SendSpellToServer(enemySpell, isEnemy: true, (result) =>
-        {
-            if (result == null) return;
-
-            // 敵の攻撃をプレイヤーに適用
-            statusManager.ApplyEnemyAttackToPlayer(result.power, result.element);
-
-            // 敵の呪文の副作用（プレイヤーに状態異常）
-            if (!string.IsNullOrEmpty(result.status_effect) && result.status_effect != "none")
-                statusManager.ApplyStatusEffect(result.status_effect);
-
-            statusManager.ShowEnemyAction(result.effect, result.element, result.power, result.log_message, result.status_effect ?? "none");
-        }));
-
-        if (!statusManager.IsBattleOver)
-            StartCoroutine(AfterEnemyTurn());
-    }
-
-    // ✅ 敵ターン終了後：プレイヤーターンへ移行
-    private IEnumerator AfterEnemyTurn()
-    {
-        yield return new WaitForSeconds(2.0f);
-        statusManager.SetPlayerTurn();
-        UpdateTurnUI("Your Turn! Chant a spell.");
-        SetInputInteractable(true);
-    }
-
-    // ✅ サーバー通信の共通処理（プレイヤー・敵どちらも使う）
-    private IEnumerator SendSpellToServer(string spellText, bool isEnemy, System.Action<SpellResult> onComplete)
-    {
-        // is_enemyフラグをJSONに含める
-        string jsonBody = "{\"spell\":\"" + spellText + "\",\"is_enemy\":" + (isEnemy ? "true" : "false") + "}";
-
-        using (UnityWebRequest request = new UnityWebRequest(vercelApiUrl, "POST"))
-        {
-            byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonBody);
-            request.uploadHandler   = new UploadHandlerRaw(bodyRaw);
-            request.downloadHandler = new DownloadHandlerBuffer();
-            request.SetRequestHeader("Content-Type", "application/json");
-
-            yield return request.SendWebRequest();
-
-            if (request.result == UnityWebRequest.Result.ConnectionError ||
-                request.result == UnityWebRequest.Result.ProtocolError)
-            {
-                Debug.LogError("API Error: " + request.error);
-                if (!isEnemy) damageText.text = "Mana unstable! Connection failed.";
-                onComplete(null);
-                yield break;
-            }
-
-            string raw = request.downloadHandler.text;
-            Debug.Log($"[{(isEnemy ? 'E' : 'P')}] Server Response: " + raw);
-
-            try
-            {
-                SpellResult result = JsonUtility.FromJson<SpellResult>(raw);
-                onComplete(result);
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogError("JSON Parse Error: " + ex.Message);
-                if (!isEnemy) damageText.text = "Glitch Overload!";
-                onComplete(null);
-            }
+        const responseData = await geminiResponse.json();
+        const candidate = responseData.candidates?.[0];
+        if (!candidate) {
+            return res.status(500).json({ error: 'No response from Gemini.' });
         }
-    }
 
-    private void UpdateTurnUI(string message)
-    {
-        if (turnIndicatorText != null)
-            turnIndicatorText.text = message;
-    }
+        let rawAiText = candidate.content?.parts?.[0]?.text?.trim();
+        if (!rawAiText) {
+            return res.status(500).json({ error: 'Empty response from Gemini.' });
+        }
 
-    private void SetInputInteractable(bool interactable)
-    {
-        if (spellInputField != null) spellInputField.interactable = interactable;
+        console.log("Raw AI Response:", rawAiText);
+
+        // キーワードベースのパース（Gemmaが余計なテキストを返しても対応）
+        const extract = (key) => {
+            const match = rawAiText.match(new RegExp(key + ':\\s*(.+)', 'i'));
+            return match ? match[1].trim() : null;
+        };
+
+        const power   = parseFloat(extract('POWER')) || 0.5;
+        const element = extract('ELEMENT') || 'fire';
+        const effect  = extract('EFFECT')  || 'A mysterious energy surges.';
+        const log     = extract('LOG')     || 'The spell was cast.';
+        let status    = (extract('STATUS') || 'none').toLowerCase();
+
+        // powerが高いのにnoneの場合はサーバー側で補正
+        if (power >= 2.5 && status === "none") {
+            const effects = ["stun", "curse", "poison"];
+            status = effects[Math.floor(Math.random() * effects.length)];
+        } else if (power >= 1.5 && status === "none") {
+            const effects = ["poison", "burn", "blind"];
+            status = effects[Math.floor(Math.random() * effects.length)];
+        }
+
+        return res.status(200).json({
+            power,
+            element,
+            effect,
+            log_message:   log,
+            status_effect: status
+        });
+
+    } catch (error) {
+        console.error("Internal Server Error:", error);
+        return res.status(500).json({
+            error: 'Internal Server Error',
+            details: error.message
+        });
     }
 }
