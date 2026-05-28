@@ -15,7 +15,7 @@ export default async function handler(req, res) {
             return res.status(500).json({ error: 'Server configuration error: GEMINI_API_KEY is missing.' });
         }
 
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemma-4-26b-it:generateContent?key=${apiKey}`;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent?key=${apiKey}`;
 
         let prompt;
 
