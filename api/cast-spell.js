@@ -22,26 +22,25 @@ export default async function handler(req, res) {
         if (is_enemy) {
             prompt =
                 "Game: Spell Glitch. You are an enemy wizard casting a spell against the player.\n" +
-                "The enemy's chosen spell is: \"" + spell + "\"\n\n" +
-                "Reply with ONLY these 5 lines, nothing else:\n" +
-                "##POWER## [number between 0.3 and 3.0]\n" +
-                "##ELEMENT## [fire/water/thunder/wind/dark/glitch]\n" +
-                "##EFFECT## [short visual description of the enemy's attack]\n" +
-                "##LOG## [flavor text describing the enemy's action]\n" +
-                "##STATUS## [none/poison/stun/burn/blind/curse]\n\n" +
-                "Rules for ##POWER##: weak=0.3-0.7, normal=0.8-1.5, strong=1.6-3.0\n" +
-                "Rules for ##STATUS##: power<=0.7=none, power0.8-1.4=none or blind, power>=1.5=poison or burn or stun";
+                "Spell: \"" + spell + "\"\n\n" +
+                "Output ONLY these 5 lines at the very end of your response:\n" +
+                "POWER: [number 0.3-3.0]\n" +
+                "ELEMENT: [fire/water/thunder/wind/dark/glitch]\n" +
+                "EFFECT: [short visual description]\n" +
+                "LOG: [flavor text]\n" +
+                "STATUS: [none/poison/stun/burn/blind/curse]\n\n" +
+                "STATUS rules: power<=0.7=none, power0.8-1.4=blind or none, power>=1.5=poison or burn or stun";
         } else {
             prompt =
                 "Game: Spell Glitch. Evaluate this spell: \"" + spell + "\"\n\n" +
-                "Reply with ONLY these 5 lines, nothing else:\n" +
-                "##POWER## [number between 0.1 and 5.0]\n" +
-                "##ELEMENT## [fire/water/thunder/wind/dark/glitch/heal]\n" +
-                "##EFFECT## [short visual description]\n" +
-                "##LOG## [flavor text]\n" +
-                "##STATUS## [none/poison/stun/burn/blind/curse]\n\n" +
-                "Rules for ##POWER##: simple spell=0.3-0.7, modified=0.8-1.5, chaotic=2.0-5.0\n" +
-                "Rules for ##STATUS##: power<=0.7=none, power0.8-1.4=blind or none, power1.5-2.4=poison or burn or blind, power>=2.5=stun or curse or poison";
+                "Output ONLY these 5 lines at the very end of your response:\n" +
+                "POWER: [number 0.1-5.0]\n" +
+                "ELEMENT: [fire/water/thunder/wind/dark/glitch/heal]\n" +
+                "EFFECT: [short visual description]\n" +
+                "LOG: [flavor text]\n" +
+                "STATUS: [none/poison/stun/burn/blind/curse]\n\n" +
+                "POWER rules: simple=0.3-0.7, modified=0.8-1.5, chaotic=2.0-5.0\n" +
+                "STATUS rules: power<=0.7=none, power0.8-1.4=blind or none, power1.5-2.4=poison/burn/blind, power>=2.5=stun/curse/poison";
         }
 
         const requestPayload = {
@@ -73,17 +72,22 @@ export default async function handler(req, res) {
 
         console.log("Raw AI Response:", rawAiText);
 
-        // ✅ ##キーワード## 形式で抽出（大文字小文字混在の誤マッチを防ぐ）
-        const extract = (key) => {
-            const match = rawAiText.match(new RegExp('##' + key + '##\\s*(.+)', 'i'));
-            return match ? match[1].trim() : null;
+        // ✅ 最後に出現したキーワードを取得（思考過程より後に書かれた値を優先）
+        const extractLast = (key) => {
+            const regex = new RegExp('^' + key + ':\\s*(.+)', 'gim');
+            let lastMatch = null;
+            let match;
+            while ((match = regex.exec(rawAiText)) !== null) {
+                lastMatch = match[1].trim();
+            }
+            return lastMatch;
         };
 
-        const power   = parseFloat(extract('POWER')) || 0.5;
-        const element = extract('ELEMENT') || 'fire';
-        const effect  = extract('EFFECT')  || 'A mysterious energy surges.';
-        const log     = extract('LOG')     || 'The spell was cast.';
-        let status    = (extract('STATUS') || 'none').toLowerCase();
+        const power   = parseFloat(extractLast('POWER')) || 0.5;
+        const element = extractLast('ELEMENT') || 'fire';
+        const effect  = extractLast('EFFECT')  || 'A mysterious energy surges.';
+        const log     = extractLast('LOG')     || 'The spell was cast.';
+        let status    = (extractLast('STATUS') || 'none').toLowerCase();
 
         // powerが高いのにnoneの場合はサーバー側で補正
         if (power >= 2.5 && status === "none") {
