@@ -80,11 +80,25 @@ export default async function handler(req, res) {
 
         console.log("Raw AI Response:", rawAiText);
 
-        // ✅ キーワード行から最後に出現した値を取得（思考過程より後を優先）
+        // ✅ 全行を走査して「最後に出現したキー行」の値を取得
+        // - 大文字小文字を無視（POWER / power 両対応）
+        // - 行頭の記号・空白・箇条書き（* - >) を読み飛ばす
+        // - 括弧やコメント付きの値にも対応
         const extractLast = (key) => {
-            const regex = new RegExp('^' + key + ':\\s*(.+)', 'gim');
-            let lastMatch = null, match;
-            while ((match = regex.exec(rawAiText)) !== null) lastMatch = match[1].trim();
+            const lines = rawAiText.split('\n');
+            const keyLower = key.toLowerCase();
+            let lastMatch = null;
+            for (const line of lines) {
+                // 行頭のゴミ文字（* - > 空白など）を除去してからマッチ
+                const cleaned = line.replace(/^[\s\*\-\>]+/, '').trim();
+                const colonIdx = cleaned.indexOf(':');
+                if (colonIdx === -1) continue;
+                const k = cleaned.slice(0, colonIdx).trim().toLowerCase();
+                if (k === keyLower) {
+                    const v = cleaned.slice(colonIdx + 1).trim();
+                    if (v) lastMatch = v;
+                }
+            }
             return lastMatch;
         };
 
@@ -101,11 +115,11 @@ export default async function handler(req, res) {
             return raw.match(/^[a-zA-Z_]+/)?.[0]?.toLowerCase() || fallback;
         };
 
-        const power   = extractNumber('POWER',   0.5);
-        const element = extractWord  ('ELEMENT', 'fire');
-        const effect  = extractLast  ('EFFECT')  || 'A mysterious energy surges.';
-        const log     = extractLast  ('LOG')     || 'The spell was cast.';
-        let status    = extractWord  ('STATUS',  'none');
+        const power   = extractNumber('power',   0.5);
+        const element = extractWord  ('element', 'fire');
+        const effect  = extractLast  ('effect')  || 'A mysterious energy surges.';
+        const log     = extractLast  ('log')     || 'The spell was cast.';
+        let status    = extractWord  ('status',  'none');
 
         // ✅ 敵用はバックラッシュなし
         if (is_enemy) {
@@ -127,8 +141,8 @@ export default async function handler(req, res) {
         }
 
         // ✅ プレイヤー用：バックラッシュ
-        let backlashDamage = extractNumber('BACKLASH_DAMAGE', 0.0);
-        let backlashStatus = extractWord  ('BACKLASH_STATUS', 'none');
+        let backlashDamage = extractNumber('backlash_damage', 0.0);
+        let backlashStatus = extractWord  ('backlash_status', 'none');
 
         const isGlitch = element === 'glitch';
 
