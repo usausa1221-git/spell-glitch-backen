@@ -33,17 +33,18 @@ export default async function handler(req, res) {
         } else {
             prompt =
                 "Game: Spell Glitch. Evaluate this spell incantation: \"" + spell + "\"\n\n" +
-                "Output ONLY these 7 lines at the very end of your response:\n" +
+                "Output ONLY these 8 lines at the very end of your response:\n" +
                 "POWER: [number 0.1-5.0]\n" +
-                // ✅ ここに "mana" を追加
                 "ELEMENT: [fire/water/thunder/wind/dark/glitch/heal/mana]\n" +
                 "EFFECT: [short visual description]\n" +
                 "LOG: [flavor text]\n" +
                 "STATUS: [none/poison/stun/burn/blind/curse]\n" +
                 "BACKLASH_DAMAGE: [0.00-0.50]\n" +
-                "BACKLASH_STATUS: [none/burn/blind/stun/curse/poison]\n\n" +
+                "BACKLASH_STATUS: [none/burn/blind/stun/curse/poison]\n" +
+                "BUFF_SPD: [number 0-30]\n\n" + // ✅ 追加
                 "power rules: simple spell=0.3-0.7, modified spell=0.8-1.5, chaotic spell=2.0-5.0\n" +
                 "STATUS rules: power<=0.7=none, power0.8-1.4=blind or none, power1.5-2.4=poison/burn/blind, power>=2.5=stun/curse/poison\n" +
+                "BUFF_SPD rules: If the spell implies speed, haste, agility, or time, set BUFF_SPD to 5-30. Otherwise 0.\n" + // ✅ 追加
                 "BACKLASH rules (self-damage the caster suffers for powerful spells):\n" +
                 "  power<2.5 -> BACKLASH_DAMAGE=0.00, BACKLASH_STATUS=none\n" +
                 "  power2.5-3.4 -> BACKLASH_DAMAGE=0.05-0.10, BACKLASH_STATUS=none\n" +
@@ -135,6 +136,7 @@ export default async function handler(req, res) {
 
         let backlashDamage = extractNumber('backlash_damage', 0.0);
         let backlashStatus = extractWord  ('backlash_status', 'none');
+        let buffSpd        = extractNumber('buff_spd', 0.0); // ✅ 速度バフ抽出
 
         const isGlitch = element === 'glitch';
 
@@ -166,8 +168,6 @@ export default async function handler(req, res) {
             status = ['poison', 'burn', 'blind'][Math.floor(Math.random() * 3)];
         }
 
-        console.log(`Parsed → power:${power} element:${element} status:${status} backlash_damage:${backlashDamage} backlash_status:${backlashStatus}`);
-
         return res.status(200).json({
             power,
             element,
@@ -175,7 +175,8 @@ export default async function handler(req, res) {
             log_message:      log,
             status_effect:    status,
             backlash_damage:  Math.round(backlashDamage * 100) / 100,
-            backlash_status:  backlashStatus
+            backlash_status:  backlashStatus,
+            buff_spd:         Math.round(buffSpd) // ✅ JSONレスポンスに追加
         });
 
     } catch (error) {
