@@ -15,32 +15,33 @@ export default async function handler(req, res) {
             return res.status(500).json({ error: 'Server configuration error: GEMINI_API_KEY is missing.' });
         }
 
-        // ✅ gemini-2.0-flash に変更（2.5-flashより高い無料枠、v1beta対応）
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-        const fullPrompt =
+        const systemInstruction =
             "You are the backend engine of the game 'Spell Glitch'. " +
-            "Evaluate the following spell incantation and respond ONLY with a JSON object. " +
-            "No markdown, no explanation, just raw JSON.\n\n" +
+            "The player inputs a spell incantation and you evaluate its power and side effects. " +
 
-            "RULES:\n" +
-            "- power (float 0.1~5.0): simple spell=0.3~0.7, modified=0.8~1.5, chaotic=2.0~5.0\n" +
-            "- element: fire, water, thunder, wind, dark, glitch, heal, etc.\n" +
-            "- status_effect (MANDATORY):\n" +
-            "  - power <= 0.7 → 'none'\n" +
-            "  - power 0.8~1.4 → 'blind' or 'none'\n" +
-            "  - power 1.5~2.4 → MUST be one of: poison, burn, blind\n" +
-            "  - power >= 2.5  → MUST be one of: stun, curse, poison\n" +
-            "- effect: short visual description\n" +
-            "- log_message: flavor text for the magic tome\n\n" +
+            "STEP 1 - Determine power (float between 0.1 and 5.0): " +
+            "- Simple clean spell (e.g. 'fire', 'heal'): power 0.3~0.7 " +
+            "- Modified spell (e.g. 'mega fire', 'super heal'): power 0.8~1.5 " +
+            "- Chaotic spell (e.g. 'EXPLODE EVERYTHING', 'ultra death glitch'): power 2.0~5.0 " +
 
-            "OUTPUT FORMAT (strict):\n" +
-            "{ \"power\": float, \"element\": \"string\", \"effect\": \"string\", \"log_message\": \"string\", \"status_effect\": \"string\" }\n\n" +
+            "STEP 2 - Determine element string: fire, water, thunder, wind, dark, glitch, heal, etc. " +
 
-            "Spell to evaluate: \"" + spell + "\"";
+            "STEP 3 - Determine status_effect. This is a MANDATORY field. Rules: " +
+            "- power <= 0.7: status_effect = 'none' " +
+            "- power 0.8~1.4: choose 'blind' or 'none' " +
+            "- power 1.5~2.4: MUST apply one of: poison, burn, blind " +
+            "- power >= 2.5: MUST apply one of: stun, curse, poison " +
+
+            "STEP 4 - Write effect (short visual description) and log_message (flavor text). " +
+
+            "Output raw JSON only, no markdown. Exact format: " +
+            "{ \"power\": float, \"element\": \"string\", \"effect\": \"string\", \"log_message\": \"string\", \"status_effect\": \"string\" }";
 
         const requestPayload = {
-            contents: [{ parts: [{ text: fullPrompt }] }]
+            contents: [{ parts: [{ text: spell }] }],
+            systemInstruction: { parts: [{ text: systemInstruction }] }
         };
 
         const geminiResponse = await fetch(geminiUrl, {
@@ -83,6 +84,7 @@ export default async function handler(req, res) {
             parsedGameResult.status_effect = "none";
         }
 
+        // powerが高いのにnoneの場合はサーバー側で補正
         if (parsedGameResult.power >= 2.5 && parsedGameResult.status_effect === "none") {
             const effects = ["stun", "curse", "poison"];
             parsedGameResult.status_effect = effects[Math.floor(Math.random() * effects.length)];
