@@ -23,32 +23,36 @@ export default async function handler(req, res) {
             prompt =
                 "Game: Spell Glitch. You are an enemy wizard casting a spell against the player.\n" +
                 "Spell: \"" + spell + "\"\n\n" +
-                "Output ONLY these 5 lines at the very end of your response:\n" +
-                "POWER: [number 0.3-3.0]\n" +
-                "ELEMENT: [fire/water/thunder/wind/dark/glitch]\n" +
-                "EFFECT: [short visual description]\n" +
-                "LOG: [flavor text]\n" +
-                "STATUS: [none/poison/stun/burn/blind/curse]\n\n" +
-                "STATUS rules: power<=0.7=none, power0.8-1.4=blind or none, power>=1.5=poison or burn or stun";
+                "Respond ONLY with a single JSON object. No explanation, no markdown, no code block.\n" +
+                "{\n" +
+                "  \"power\": <number 0.3-3.0>,\n" +
+                "  \"element\": \"<fire|water|thunder|wind|dark|glitch>\",\n" +
+                "  \"effect\": \"<short visual description>\",\n" +
+                "  \"log_message\": \"<flavor text>\",\n" +
+                "  \"status_effect\": \"<none|poison|stun|burn|blind|curse>\"\n" +
+                "}\n\n" +
+                "status_effect rules: power<=0.7=none, power0.8-1.4=blind or none, power>=1.5=poison or burn or stun";
         } else {
             prompt =
-                "Game: Spell Glitch. Evaluate this spell: \"" + spell + "\"\n\n" +
-                "Output ONLY these 7 lines at the very end of your response:\n" +
-                "POWER: [number 0.1-5.0]\n" +
-                "ELEMENT: [fire/water/thunder/wind/dark/glitch/heal]\n" +
-                "EFFECT: [short visual description]\n" +
-                "LOG: [flavor text]\n" +
-                "STATUS: [none/poison/stun/burn/blind/curse]\n" +
-                "BACKLASH_DAMAGE: [0.00-0.50]\n" +
-                "BACKLASH_STATUS: [none/burn/blind/stun/curse/poison]\n\n" +
-                "POWER rules: simple=0.3-0.7, modified=0.8-1.5, chaotic=2.0-5.0\n" +
-                "STATUS rules: power<=0.7=none, power0.8-1.4=blind or none, power1.5-2.4=poison/burn/blind, power>=2.5=stun/curse/poison\n" +
-                "BACKLASH rules (self-damage/status the caster suffers for powerful spells):\n" +
-                "  power<2.5: BACKLASH_DAMAGE=0.00, BACKLASH_STATUS=none\n" +
-                "  power2.5-3.4: BACKLASH_DAMAGE=0.05-0.10, BACKLASH_STATUS=none\n" +
-                "  power3.5-4.4: BACKLASH_DAMAGE=0.10-0.20, BACKLASH_STATUS=burn or blind or none\n" +
-                "  power>=4.5: BACKLASH_DAMAGE=0.20-0.50, BACKLASH_STATUS=stun or curse or poison\n" +
-                "  element=glitch: increase BACKLASH_DAMAGE by 0.10 and raise chance of BACKLASH_STATUS";
+                "Game: Spell Glitch. Evaluate this spell incantation: \"" + spell + "\"\n\n" +
+                "Respond ONLY with a single JSON object. No explanation, no markdown, no code block.\n" +
+                "{\n" +
+                "  \"power\": <number 0.1-5.0>,\n" +
+                "  \"element\": \"<fire|water|thunder|wind|dark|glitch|heal>\",\n" +
+                "  \"effect\": \"<short visual description>\",\n" +
+                "  \"log_message\": \"<flavor text>\",\n" +
+                "  \"status_effect\": \"<none|poison|stun|burn|blind|curse>\",\n" +
+                "  \"backlash_damage\": <number 0.00-0.50>,\n" +
+                "  \"backlash_status\": \"<none|burn|blind|stun|curse|poison>\"\n" +
+                "}\n\n" +
+                "power rules: simple spell=0.3-0.7, modified spell=0.8-1.5, chaotic spell=2.0-5.0\n" +
+                "status_effect rules: power<=0.7=none, power0.8-1.4=blind or none, power1.5-2.4=poison/burn/blind, power>=2.5=stun/curse/poison\n" +
+                "backlash rules (self-damage the caster suffers for powerful spells):\n" +
+                "  power<2.5 -> backlash_damage=0.00, backlash_status=none\n" +
+                "  power2.5-3.4 -> backlash_damage=0.05-0.10, backlash_status=none\n" +
+                "  power3.5-4.4 -> backlash_damage=0.10-0.20, backlash_status=burn or blind or none\n" +
+                "  power>=4.5 -> backlash_damage=0.20-0.50, backlash_status=stun or curse or poison\n" +
+                "  element=glitch -> backlash_damage +0.10, higher chance of backlash_status";
         }
 
         const requestPayload = {
@@ -80,34 +84,29 @@ export default async function handler(req, res) {
 
         console.log("Raw AI Response:", rawAiText);
 
-        // ✅ 最後に出現したキーワード行の値を取得
-        const extractLast = (key) => {
-            const regex = new RegExp('^' + key + ':\\s*(.+)', 'gim');
-            let lastMatch = null, match;
-            while ((match = regex.exec(rawAiText)) !== null) lastMatch = match[1].trim();
-            return lastMatch;
-        };
+        // ✅ JSONパース：```json ... ``` のコードブロックが含まれていても対応
+        let parsed;
+        try {
+            const jsonMatch = rawAiText.match(/```json\s*([\s\S]*?)```/) ||
+                              rawAiText.match(/```\s*([\s\S]*?)```/)     ||
+                              rawAiText.match(/(\{[\s\S]*\})/);
+            const jsonStr = jsonMatch ? jsonMatch[1].trim() : rawAiText;
+            parsed = JSON.parse(jsonStr);
+        } catch (e) {
+            console.error("JSON parse failed:", e.message, "| Raw:", rawAiText);
+            return res.status(500).json({ error: 'Failed to parse Gemini response as JSON.', raw: rawAiText });
+        }
 
-        // ✅ 数値抽出：先頭の数値のみ取得（"3.8 (Chaotic...)" → 3.8）
-        const extractNumber = (key, fallback) => {
-            const raw = extractLast(key) || '';
-            const num = parseFloat(raw.match(/^[\d.]+/)?.[0]);
-            return isNaN(num) ? fallback : num;
-        };
+        // ✅ 値の正規化（型安全・デフォルト値）
+        let power          = parseFloat(parsed.power)          || 0.5;
+        let element        = (parsed.element        || 'fire').toLowerCase();
+        let effect         = parsed.effect          || 'A mysterious energy surges.';
+        let log            = parsed.log_message     || 'The spell was cast.';
+        let status         = (parsed.status_effect  || 'none').toLowerCase();
+        let backlashDamage = parseFloat(parsed.backlash_damage) || 0.0;
+        let backlashStatus = (parsed.backlash_status || 'none').toLowerCase();
 
-        // ✅ 単語抽出：先頭の英単語のみ取得（"glitch - OK." → "glitch"）
-        const extractWord = (key, fallback) => {
-            const raw = extractLast(key) || '';
-            return raw.match(/^[a-zA-Z_]+/)?.[0]?.toLowerCase() || fallback;
-        };
-
-        const power   = extractNumber('POWER',   0.5);
-        const element = extractWord  ('ELEMENT', 'fire');
-        const effect  = extractLast  ('EFFECT')  || 'A mysterious energy surges.';
-        const log     = extractLast  ('LOG')     || 'The spell was cast.';
-        let status    = extractWord  ('STATUS',  'none');
-
-        // 敵用はバックラッシュなし
+        // ✅ 敵用はバックラッシュなし
         if (is_enemy) {
             if (power >= 2.5 && status === 'none') {
                 status = ['stun', 'curse', 'poison'][Math.floor(Math.random() * 3)];
@@ -126,24 +125,17 @@ export default async function handler(req, res) {
             });
         }
 
-        // --- プレイヤー用バックラッシュ計算 ---
-        let backlashDamage = extractNumber('BACKLASH_DAMAGE', 0.0);
-        let backlashStatus = extractWord  ('BACKLASH_STATUS', 'none');
-
+        // ✅ プレイヤー用：バックラッシュのサーバー側補正
         const isGlitch = element === 'glitch';
 
-        // Gemini出力が信頼できない場合のサーバー側補正
         if (power < 2.5) {
-            // 低powerは代償なし
             backlashDamage = 0.0;
             backlashStatus = 'none';
         } else if (power < 3.5) {
-            // 自傷のみゾーン
             const base = 0.05 + (power - 2.5) * 0.05;
             backlashDamage = Math.max(backlashDamage, isGlitch ? base + 0.10 : base);
             backlashStatus = 'none';
         } else if (power < 4.5) {
-            // 自傷 + 低確率状態異常ゾーン
             const base = 0.10 + (power - 3.5) * 0.10;
             backlashDamage = Math.max(backlashDamage, isGlitch ? base + 0.10 : base);
             const threshold = isGlitch ? 0.5 : 0.3;
@@ -151,7 +143,6 @@ export default async function handler(req, res) {
                 backlashStatus = ['burn', 'blind'][Math.floor(Math.random() * 2)];
             }
         } else {
-            // 最大火力ゾーン：確定自傷＋状態異常
             const base = 0.25 + (power - 4.5) * 0.10;
             backlashDamage = Math.max(backlashDamage, Math.min(isGlitch ? base + 0.15 : base, 0.50));
             if (backlashStatus === 'none') {
@@ -159,7 +150,7 @@ export default async function handler(req, res) {
             }
         }
 
-        // 通常のstatus補正
+        // ✅ 通常status補正
         if (power >= 2.5 && status === 'none') {
             status = ['stun', 'curse', 'poison'][Math.floor(Math.random() * 3)];
         } else if (power >= 1.5 && status === 'none') {
