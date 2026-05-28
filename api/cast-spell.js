@@ -63,18 +63,24 @@ export default async function handler(req, res) {
 
         if (!geminiResponse.ok) {
             const errText = await geminiResponse.text();
+            console.error("Gemini API Error Response:", errText);
             return res.status(500).json({ error: 'Failed to communicate with Gemini API.', details: errText });
         }
 
         const responseData = await geminiResponse.json();
         const candidate = responseData.candidates?.[0];
-        if (!candidate) return res.status(500).json({ error: 'No response from Gemini.' });
+        if (!candidate) {
+            return res.status(500).json({ error: 'No response from Gemini.' });
+        }
 
         let rawAiText = candidate.content?.parts?.[0]?.text?.trim();
-        if (!rawAiText) return res.status(500).json({ error: 'Empty response from Gemini.' });
+        if (!rawAiText) {
+            return res.status(500).json({ error: 'Empty response from Gemini.' });
+        }
 
         console.log("Raw AI Response:", rawAiText);
 
+        // ✅ 最後に出現したキーワード行の値を取得
         const extractLast = (key) => {
             const regex = new RegExp('^' + key + ':\\s*(.+)', 'gim');
             let lastMatch = null, match;
@@ -82,31 +88,53 @@ export default async function handler(req, res) {
             return lastMatch;
         };
 
-        const power   = parseFloat(extractLast('POWER'))   || 0.5;
-        const element = extractLast('ELEMENT') || 'fire';
-        const effect  = extractLast('EFFECT')  || 'A mysterious energy surges.';
-        const log     = extractLast('LOG')      || 'The spell was cast.';
-        let status    = (extractLast('STATUS')  || 'none').toLowerCase();
+        // ✅ 数値抽出：先頭の数値のみ取得（"3.8 (Chaotic...)" → 3.8）
+        const extractNumber = (key, fallback) => {
+            const raw = extractLast(key) || '';
+            const num = parseFloat(raw.match(/^[\d.]+/)?.[0]);
+            return isNaN(num) ? fallback : num;
+        };
+
+        // ✅ 単語抽出：先頭の英単語のみ取得（"glitch - OK." → "glitch"）
+        const extractWord = (key, fallback) => {
+            const raw = extractLast(key) || '';
+            return raw.match(/^[a-zA-Z_]+/)?.[0]?.toLowerCase() || fallback;
+        };
+
+        const power   = extractNumber('POWER',   0.5);
+        const element = extractWord  ('ELEMENT', 'fire');
+        const effect  = extractLast  ('EFFECT')  || 'A mysterious energy surges.';
+        const log     = extractLast  ('LOG')     || 'The spell was cast.';
+        let status    = extractWord  ('STATUS',  'none');
 
         // 敵用はバックラッシュなし
         if (is_enemy) {
-            if (power >= 2.5 && status === "none") {
-                status = ["stun","curse","poison"][Math.floor(Math.random()*3)];
-            } else if (power >= 1.5 && status === "none") {
-                status = ["poison","burn","blind"][Math.floor(Math.random()*3)];
+            if (power >= 2.5 && status === 'none') {
+                status = ['stun', 'curse', 'poison'][Math.floor(Math.random() * 3)];
+            } else if (power >= 1.5 && status === 'none') {
+                status = ['poison', 'burn', 'blind'][Math.floor(Math.random() * 3)];
             }
-            return res.status(200).json({ power, element, effect, log_message: log, status_effect: status });
+
+            console.log(`Parsed → power:${power} element:${element} status:${status}`);
+
+            return res.status(200).json({
+                power,
+                element,
+                effect,
+                log_message:   log,
+                status_effect: status
+            });
         }
 
         // --- プレイヤー用バックラッシュ計算 ---
-        let backlashDamage = parseFloat(extractLast('BACKLASH_DAMAGE')) || 0.0;
-        let backlashStatus = (extractLast('BACKLASH_STATUS') || 'none').toLowerCase();
+        let backlashDamage = extractNumber('BACKLASH_DAMAGE', 0.0);
+        let backlashStatus = extractWord  ('BACKLASH_STATUS', 'none');
 
         const isGlitch = element === 'glitch';
 
         // Gemini出力が信頼できない場合のサーバー側補正
         if (power < 2.5) {
-            // 低powerは代償なし（glitchでも2.0未満は免除）
+            // 低powerは代償なし
             backlashDamage = 0.0;
             backlashStatus = 'none';
         } else if (power < 3.5) {
@@ -118,25 +146,24 @@ export default async function handler(req, res) {
             // 自傷 + 低確率状態異常ゾーン
             const base = 0.10 + (power - 3.5) * 0.10;
             backlashDamage = Math.max(backlashDamage, isGlitch ? base + 0.10 : base);
-            const roll = Math.random();
             const threshold = isGlitch ? 0.5 : 0.3;
-            if (backlashStatus === 'none' && roll < threshold) {
-                backlashStatus = ['burn','blind'][Math.floor(Math.random()*2)];
+            if (backlashStatus === 'none' && Math.random() < threshold) {
+                backlashStatus = ['burn', 'blind'][Math.floor(Math.random() * 2)];
             }
         } else {
-            // 最大火力ゾーン：確定自傷+状態異常
+            // 最大火力ゾーン：確定自傷＋状態異常
             const base = 0.25 + (power - 4.5) * 0.10;
             backlashDamage = Math.max(backlashDamage, Math.min(isGlitch ? base + 0.15 : base, 0.50));
             if (backlashStatus === 'none') {
-                backlashStatus = ['stun','curse','poison'][Math.floor(Math.random()*3)];
+                backlashStatus = ['stun', 'curse', 'poison'][Math.floor(Math.random() * 3)];
             }
         }
 
         // 通常のstatus補正
-        if (power >= 2.5 && status === "none") {
-            status = ["stun","curse","poison"][Math.floor(Math.random()*3)];
-        } else if (power >= 1.5 && status === "none") {
-            status = ["poison","burn","blind"][Math.floor(Math.random()*3)];
+        if (power >= 2.5 && status === 'none') {
+            status = ['stun', 'curse', 'poison'][Math.floor(Math.random() * 3)];
+        } else if (power >= 1.5 && status === 'none') {
+            status = ['poison', 'burn', 'blind'][Math.floor(Math.random() * 3)];
         }
 
         console.log(`Parsed → power:${power} element:${element} status:${status} backlash_damage:${backlashDamage} backlash_status:${backlashStatus}`);
@@ -153,6 +180,9 @@ export default async function handler(req, res) {
 
     } catch (error) {
         console.error("Internal Server Error:", error);
-        return res.status(500).json({ error: 'Internal Server Error', details: error.message });
+        return res.status(500).json({
+            error:   'Internal Server Error',
+            details: error.message
+        });
     }
 }
